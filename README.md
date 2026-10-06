@@ -920,3 +920,82 @@ CONDITIONAL 必带合法等级、无借阅/已批准待出库 RECALL/已归还 S
 摘要、不暴露内部字段、未开放不可见；补修单开立后原开放记录保留、公众仍可见、
 闭环后不可重复闭环、撤销后不能再开立；**交叉核对**：详情/列表/CSV 导出行集一致，
 台账动作序列完整且顺序正确（整改→通过→开放→补修）。
+
+## 文物保险估值管理（museum-15）
+
+### 数据模型
+
+| 表 | 说明 |
+| --- | --- |
+| `t_ins_valuation_version` | 保险估值版本（文物内 `version_no` 递增）：来源（购藏/评估/拍卖/捐赠/其他）、来源说明、评估机构、金额、币种、有效期、凭证；状态 `DRAFT / PENDING_APPROVAL / ACTIVE / SUPERSEDED / REJECTED`，只追加流转、永不物理删除 |
+| `t_insurance_endorsement` | 保险批单：估值版本双人审批通过生效时同事务出具，不可变；`INITIAL` 首次核保 / `ADJUST` 金额变更（固化新旧版本与金额），估值版本回填 `endorsement_id`，一版本至多一张批单 |
+| `t_ins_valuation_snapshot` | 借展签约估值快照：按协议签署版本唯一、生成后不可变；固化来源/机构/金额/币种/有效期/凭证，签约时无生效估值也出快照行（金额留空并说明） |
+| `t_ins_valuation_reminder` | 估值过期提醒：一版本一条，`OPEN / ACKNOWLEDGED`，定时扫描幂等生成；只提示，不改业务状态 |
+| `t_permission_policy.valuation_change_open` | 单行策略新增开关：收紧后估值变更类动作在服务入口统一拒绝（与影像上传开关相互独立） |
+
+### 估值登记与双人审批规则
+
+- **必填要素**：来源、评估机构、金额（必须为正）、币种（CNY/USD/EUR/JPY/GBP/HKD）、
+  有效期（止晚于起）。凭证编号/名称随版本登记，供财务核对。
+- **金额修订必生新版本**：文物已有 `ACTIVE` 估值时再次登记即修订，必须填 `changeReason`；
+  新版本独立走审批，审批完成前旧版本保持 `ACTIVE`；通过后旧版本同事务置 `SUPERSEDED`
+  （金额与各字段原样保留不改写），新版本置 `ACTIVE`。
+- **双人审批**：`FIRST` 初审 + `SECOND` 复核两步；两名审批人必须不同，且都不得是提交人本人
+  （经办与审批分离）；初审不能重复、初审未到不能复核、同人复核拒绝。
+- **两签齐备才生效**：第二签通过的同事务内完成旧版 `SUPERSEDED` → 新版 `ACTIVE` →
+  出具保险批单（`ADJUST` 带旧版本金额，`INITIAL` 无上一版本）→ 回填 `endorsement_id`，
+  全程台账留痕（提交/初审/复核/生效/批单各自一条）。
+- **驳回留痕**：任一签 `REJECT`（必须填原因）版本置 `REJECTED` 永久保留、不能再审，
+  修订只能重新登记新版本。
+
+### 借展快照与过期提醒
+
+- **签约即固化**：借展协议（museum-6）每次 `sign` 生效时自动出一份不可变估值快照；
+  借展期间（押运/在展/归还）`valuation-view` 一律返回签约时快照——即使期间估值修订、
+  出具批单或到期，在借金额/币种/来源口径都不变。协议变更重新签署则再出一份新快照，
+  各按各的签署版本留档。
+- **过期只提醒、不冻结归还**：调度器按 `museum.insurance.remind-scan-interval-ms`
+  （默认 60s，启动补扫可关）扫描 `ACTIVE` 且已过 `effective_to` 的版本，每版本生成一条
+  `OPEN` 提醒（幂等）；提醒不改变估值/借展/归还任何状态——在借文物估值过期时
+  封箱/交接/到馆/开箱与归还验收照常完成。提醒由人工 `ACKNOWLEDGED` 关闭。
+
+### 字段可见性与入口闸门
+
+- **财务（FINANCE）**：当前估值、版本履历、借展快照视图都只投影金额、币种与凭证
+  （`financeView=true`），来源/评估机构/有效期/修订原因/审批人/批单明细一律不下发。
+- **公众（PUBLIC）/普通馆员（LIBRARIAN）**：触碰任何敏感估值入口（当前估值、版本履历、
+  借展估值视图、快照列表）直接拒绝，不返回脱敏空壳；拒绝走独立事务写
+  `VALUATION_ACCESS_DENY` 台账，放行与拒绝都可追溯。
+- **缺权入口闸门**：`PUT /api/policy/valuation-change {"open":false}` 收紧后，
+  博物馆文物修复用户对估值的一切推进型动作（登记/提交/初审/复核）在**服务层入口**
+  抛 `PermissionClosedException` 拒绝；闸门不绑定具体 URL，换调用地址或内部直调同样拒绝，
+  且不产生任何写入。已生效版本、批单、签约快照只读保留；只读查询与财务金额视图不受影响；
+  `open=true` 放开后审批链可继续推进。收紧/放开各写全局台账 `VAL_PERMIT_TIGHTEN/RELAX`。
+
+### 保险估值接口
+
+| 方法与路径 | 作用 |
+| --- | --- |
+| `POST /api/ins-valuations` | 登记估值版本（默认 DRAFT；`submitNow=true` 直接进入双人审批；已有生效估值时修订原因必填） |
+| `POST /api/ins-valuations/{id}/submit` | 草稿提交双人审批 |
+| `POST /api/ins-valuations/{id}/approvals` | 双人审批签署（`step=FIRST/SECOND`，`decision=APPROVE/REJECT`；两人不同且非提交人） |
+| `GET /api/relics/{relicId}/insurance-valuation?operatorName=&role=` | 当前生效估值视图（经办含批单；财务仅金额/凭证；公众/普通馆员拒绝） |
+| `GET /api/relics/{relicId}/ins-valuation-versions?operatorName=&role=` | 估值版本履历（按角色投影） |
+| `GET /api/loan-agreements/{id}/valuation-view?operatorName=&role=` | 借展期间估值口径：恒为签约时快照（角色投影同上） |
+| `GET /api/loan-agreements/{id}/valuation-snapshots?operatorName=&role=` | 协议历次签署快照 |
+| `GET /api/ins-valuation-reminders[?status=]` | 过期提醒列表 |
+| `POST /api/ins-valuation-reminders/scan` | 手动触发一轮过期扫描（幂等；不冻结归还） |
+| `POST /api/ins-valuation-reminders/{id}/ack` | 人工确认提醒（只关提醒，不改估值状态） |
+| `GET/PUT /api/policy/valuation-change` | 查看/收紧/放开估值变更留痕入口（台账留痕） |
+
+### 测试
+
+`InsuranceValuationTest`（独立内存库）覆盖：来源/机构/币种/有效期与金额正数校验；
+金额修订另出 V2、两签齐备才生效、旧版 SUPERSEDED 金额不改写、出具 INITIAL/ADJUST
+批单并回填；提交人不能自审、初审不可重复、未初审不可复核、同人复核拒绝；驳回版本留痕
+且只能重开新版本；借展签约自动快照、借展期间估值修订到 80 万 USD 后借展视图仍是
+50 万 CNY 签约口径；当前估值过期后扫描自动提醒且幂等，押运四节点+归还验收照常完成、
+确认提醒不改估值状态；财务只见金额与凭证（无来源/机构/有效期/批单字段），
+公众与普通馆员当前视图、版本履历、借展视图、快照列表全部拒绝且写 `VALUATION_ACCESS_DENY`；
+收紧后登记/提交/审批 HTTP 入口与绕过 URL 的服务层直调全部 `PermissionClosedException`
+拒绝且无写入、只读不受影响、两开关相互独立，放开后审批链继续生效出批单。

@@ -603,4 +603,58 @@ public final class MuseumConstants {
     public static final String ACTION_OPEN_DISPLAY_REVOKE = "OPEN_DISPLAY_REVOKE";
     public static final String ACTION_SUPPLEMENT_OPEN = "SUPPLEMENT_OPEN";
     public static final String ACTION_SUPPLEMENT_CLOSE = "SUPPLEMENT_CLOSE";
+
+    // --------------------------------------------------------------------
+    // museum-15 文物保险估值管理
+    // --------------------------------------------------------------------
+
+    /**
+     * 估值版本状态：
+     * DRAFT 草稿（登记未提交，可改可删不生效）
+     * / PENDING_APPROVAL 待双人审批（金额修订已提交，第一签已到/未到）
+     * / ACTIVE 当前生效 / SUPERSEDED 已被新版本取代 / REJECTED 双人审批驳回。
+     * 只追加状态流转，任何旧版本永不物理删除、永不被原地改写。
+     */
+    public static final String VAL_DRAFT = "DRAFT";
+    public static final String VAL_PENDING_APPROVAL = "PENDING_APPROVAL";
+    public static final String VAL_ACTIVE = "ACTIVE";
+    public static final String VAL_SUPERSEDED = "SUPERSEDED";
+    public static final String VAL_REJECTED = "REJECTED";
+
+    /** 金额修订双人审批签署位次：初审 / 复核（两次必须不同实签人） */
+    public static final String VAL_APPROVAL_FIRST = "FIRST";
+    public static final String VAL_APPROVAL_SECOND = "SECOND";
+
+    /** 保险批单状态：ISSUED 已出具（估值新版本生效时一并生成，不可变） */
+    public static final String ENDORSEMENT_ISSUED = "ISSUED";
+
+    /** 过期提醒状态：OPEN 待处理 / ACKNOWLEDGED 已确认（提醒只提示，不冻结归还） */
+    public static final String VAL_REMIND_OPEN = "OPEN";
+    public static final String VAL_REMIND_ACKED = "ACKNOWLEDGED";
+
+    /**
+     * 估值访问角色：
+     * VALUATION_OFFICER 估值经办（登记/提交/全字段）；FINANCE 财务（只看金额与凭证）；
+     * LIBRARIAN 普通馆员 / PUBLIC 公众（敏感估值一律不可见，入口直接拒绝）。
+     */
+    public static final String ROLE_VALUATION_OFFICER = "VALUATION_OFFICER";
+    public static final String ROLE_FINANCE = "FINANCE";
+    public static final String ROLE_PUBLIC = "PUBLIC";
+
+    /**
+     * 台账流水动作：估值登记/提交修订/双人审批签署/驳回/新版本生效/保险批单出具/
+     * 借展签约快照/过期提醒/提醒确认/越权访问拒绝。
+     */
+    public static final String ACTION_VAL_DRAFT = "VALUATION_DRAFT";
+    public static final String ACTION_VAL_SUBMIT = "VALUATION_SUBMIT";
+    public static final String ACTION_VAL_APPROVE = "VALUATION_APPROVE";
+    public static final String ACTION_VAL_REJECT = "VALUATION_REJECT";
+    public static final String ACTION_VAL_ACTIVATE = "VALUATION_ACTIVATE";
+    public static final String ACTION_VAL_ENDORSEMENT = "INSURANCE_ENDORSEMENT";
+    public static final String ACTION_VAL_SNAPSHOT = "VALUATION_LOAN_SNAPSHOT";
+    public static final String ACTION_VAL_EXPIRE_REMIND = "VALUATION_EXPIRE_REMIND";
+    public static final String ACTION_VAL_REMIND_ACK = "VALUATION_REMIND_ACK";
+    public static final String ACTION_VAL_ACCESS_DENY = "VALUATION_ACCESS_DENY";
+    public static final String ACTION_VAL_POLICY_TIGHTEN = "VAL_PERMIT_TIGHTEN";
+    public static final String ACTION_VAL_POLICY_RELAX = "VAL_PERMIT_RELAX";
 }

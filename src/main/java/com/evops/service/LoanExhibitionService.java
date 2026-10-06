@@ -76,6 +76,7 @@ public class LoanExhibitionService {
     private final RepairProjectMapper projectMapper;
     private final RelicService relicService;
     private final LedgerService ledgerService;
+    private final InsuranceValuationService valuationService;
 
     public LoanExhibitionService(LoanAgreementMapper agreementMapper,
                                  LoanAgreementVersionMapper versionMapper,
@@ -86,7 +87,8 @@ public class LoanExhibitionService {
                                  RelicLoanMapper relicLoanMapper,
                                  RepairProjectMapper projectMapper,
                                  RelicService relicService,
-                                 LedgerService ledgerService) {
+                                 LedgerService ledgerService,
+                                 InsuranceValuationService valuationService) {
         this.agreementMapper = agreementMapper;
         this.versionMapper = versionMapper;
         this.manifestMapper = manifestMapper;
@@ -97,6 +99,7 @@ public class LoanExhibitionService {
         this.projectMapper = projectMapper;
         this.relicService = relicService;
         this.ledgerService = ledgerService;
+        this.valuationService = valuationService;
     }
 
     // ------------------------------------------------------------------
@@ -200,6 +203,11 @@ public class LoanExhibitionService {
             agreement.setStatus(AGR_SIGNED);
             agreementMapper.updateById(agreement);
         }
+
+        // museum-15：签约即固化保险估值快照（不可变）。借展期间一律沿用本快照，
+        // 即使随后估值修订、出具批单或到期提醒，在借口径都不变化。
+        // 快照读取不修改估值，属签约事实固化，不受估值变更收紧闸门影响。
+        valuationService.snapshotOnAgreementSigned(agreement, current, req.getSignedBy(), now);
 
         ledgerService.append(agreement.getRelicId(), null, null,
                 ACTION_LOAN_AGR_SIGN, agreement.getAgreementNo(),
