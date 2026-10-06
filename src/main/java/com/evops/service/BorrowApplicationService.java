@@ -70,6 +70,7 @@ public class BorrowApplicationService {
     private final BorrowPolicyService policyService;
     private final RelicService relicService;
     private final LedgerService ledgerService;
+    private final InsuranceValuationService valuationService;
     private final ObjectMapper objectMapper;
 
     public BorrowApplicationService(BorrowApplicationMapper applicationMapper,
@@ -84,6 +85,7 @@ public class BorrowApplicationService {
                                     BorrowPolicyService policyService,
                                     RelicService relicService,
                                     LedgerService ledgerService,
+                                    InsuranceValuationService valuationService,
                                     ObjectMapper objectMapper) {
         this.applicationMapper = applicationMapper;
         this.approvalMapper = approvalMapper;
@@ -97,6 +99,7 @@ public class BorrowApplicationService {
         this.policyService = policyService;
         this.relicService = relicService;
         this.ledgerService = ledgerService;
+        this.valuationService = valuationService;
         this.objectMapper = objectMapper;
     }
 
@@ -282,7 +285,10 @@ public class BorrowApplicationService {
                 app.setStatus(BAPP_APPROVED);
                 app.setApprovedAt(now);
                 applicationMapper.updateById(app);
-                generateSnapshot(app, listChain(app.getId(), ORIGINAL_CHAIN), now);
+                BorrowSnapshot snapshot = generateSnapshot(app, listChain(app.getId(), ORIGINAL_CHAIN), now);
+                // 借展签约固化当时生效的保险估值版本；借展期间沿用该签约时快照，
+                // 估值随后修订出新版本或过期均不改写出库/归还原口径
+                valuationService.bindOnLoanApproved(app.getId(), snapshot.getId(), app.getRelicId(), now);
                 ledgerService.append(app.getRelicId(), null, null,
                         ACTION_BORROW_APPROVE, app.getApplicationNo(),
                         "借阅审批全部通过（共 " + chain.size() + " 步"
@@ -626,7 +632,7 @@ public class BorrowApplicationService {
     // 内部辅助
     // ------------------------------------------------------------------
 
-    private void generateSnapshot(BorrowApplication app, List<BorrowApprovalRecord> records,
+    private BorrowSnapshot generateSnapshot(BorrowApplication app, List<BorrowApprovalRecord> records,
                                   LocalDateTime now) {
         Relic relic = relicService.requireRelic(app.getRelicId());
         StringBuilder chain = new StringBuilder();
@@ -667,6 +673,7 @@ public class BorrowApplicationService {
         snapshot.setDirectorSignName(directorName);
         snapshot.setGeneratedAt(now);
         snapshotMapper.insert(snapshot);
+        return snapshot;
     }
 
     private List<BorrowApprovalRecord> listChain(Long applicationId, long extensionId) {

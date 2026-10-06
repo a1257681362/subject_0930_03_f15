@@ -920,3 +920,77 @@ CONDITIONAL 必带合法等级、无借阅/已批准待出库 RECALL/已归还 S
 摘要、不暴露内部字段、未开放不可见；补修单开立后原开放记录保留、公众仍可见、
 闭环后不可重复闭环、撤销后不能再开立；**交叉核对**：详情/列表/CSV 导出行集一致，
 台账动作序列完整且顺序正确（整改→通过→开放→补修）。
+
+## 文物保险估值管理（museum-15）
+
+一件文物一份保险估值主单；**估值来源、评估机构、币种、有效期随版本固化**。
+V1 初始登记即生效；此后任何金额修订都**生成新版本并关联保险批单**（批单号必填），
+旧生效版本置 `SUPERSEDED`，只追加不改写。修订版本先进入 `PENDING_APPROVAL`，
+**必须由与提出人不同的复核人双人审批**通过后才生效（同人复核一律拒绝，
+驳回必须填意见、版本封存只读）。**借阅审批全部通过（签约生成借阅快照）时把当时
+生效版本固化为借展绑定，借展期间出库/归还原口径一律沿用该签约时快照**，估值随后
+修订出新版本或原版本过期均不改写。有效期**临期/过期只自动提醒**（启动补扫 +
+周期扫描，按 估值+版本+类型 幂等；新版本生效后旧提醒自动闭环留痕），
+**提醒不冻结借展出库，更不冻结归还**。字段级访问：保险管理员见全部；**财务只见
+金额/币种/有效期与凭证**（来源、评估机构、批单、签署人等剥离）；**公众与普通馆员
+不能访问任何敏感字段**。权限策略单行表新增开关，收紧时「文物保险估值变更留痕」
+在**服务入口即拒绝**（闸口不在 URL 层，换任何调用地址都不放行），已固化版本、
+批单关联、借展绑定与台账事实全部保留。
+
+### 数据模型
+
+| 表 | 说明 |
+| --- | --- |
+| `t_permission_policy` | 单行策略表新增 `insurance_valuation_change_open`：文物修复用户缺权时估值变更留痕入口拒绝 |
+| `t_insurance_valuation` | 估值主单：一件文物唯一（`uk(relic_id)`），`IV-%06d` 取号，指向当前生效版本 |
+| `t_insurance_valuation_version` | 估值版本：金额/币种/来源/评估机构/报告号/有效期/依据随版本固化；修订版本带保险批单号（`endorsement_no`）、提出人与复核人；`PENDING_APPROVAL / APPROVED / SUPERSEDED / REJECTED`，`uk(valuation_id,version_no)` |
+| `t_insurance_valuation_voucher` | 版本凭证引用（评估报告/批单），只追加；财务可见凭证但不可见来源机构 |
+| `t_insurance_valuation_loan_bind` | 借展签约绑定（`uk(application_id)`，不可变）：固化签约时生效版本，借展期间沿用 |
+| `t_insurance_valuation_reminder` | 临期 EXPIRING / 过期 EXPIRED 提醒（`uk(valuation_id,version_id,type)` 幂等，重复扫描累加次数），`OPEN / RESOLVED`；只提醒不冻结 |
+
+### 估值与审批规则
+
+- **登记与修订**：一件文物只能登记一份估值，重复登记拒绝并提示走修订；V1 登记即
+  `APPROVED`（首次估值非"修订"，无需双人审批）。修订必须填保险批单号、至少一张
+  凭证；存在待复核版本时不能重复提出；有效期截止必须晚于生效时间。
+- **双人审批**：复核人姓名不得与提出人相同，否则拒绝；`APPROVE` 后新版本生效、
+  旧 `APPROVED` 版本置 `SUPERSEDED` 并记 `superseded_at`；`REJECT` 必填意见，
+  版本封存 `REJECTED` 只读，不能再次审批。
+- **借展沿用签约快照**：借阅审批末步通过时自动绑定当时生效版本；借展期间
+  `GET /api/borrow-applications/{id}/insurance-valuation` 返回的 `boundVersion`
+  始终是签约版本（并给出当前版本号与 `followsSignSnapshot` 对照）；文物无估值记录
+  不阻断签约，口径以借阅快照保险金额为准。
+- **过期不冻结**：扫描只对当前 `APPROVED` 版本提提醒，不修改任何借展/出库/归还状态；
+  估值已过期文物仍可正常审批、出库、归还。
+- **字段级访问**：`INSURANCE_ADMIN` 全字段；`FINANCE` 仅 id/版本号/状态/金额/币种/
+  有效期/取代时间/凭证；`PUBLIC`、`LIBRARIAN` 或未声明角色一律拒绝（借展绑定查询
+  与提醒列表同口径）。
+- **缺权入口拒绝**：`PUT /api/policy/insurance-valuation-change {"open":false}` 收紧后，
+  登记、修订、复核三个写动作无论从哪个 URL 调用都在服务层抛 `PermissionClosedException`；
+  只读查询不受影响；放开后恢复。收紧/放开与各业务动作全部写台账
+  （`IVAL_REGISTER / IVAL_REVISE / IVAL_REVIEW_APPROVE / IVAL_REVIEW_REJECT /
+  IVAL_LOAN_BIND / IVAL_REMIND / IVAL_PERMIT_TIGHTEN / IVAL_PERMIT_RELAX`）。
+
+### 保险估值接口
+
+| 方法与路径 | 作用 |
+| --- | --- |
+| `PUT/GET /api/policy/insurance-valuation-change` | 收紧（入口拒绝）/放开保险估值变更留痕 / 查看策略 |
+| `POST /api/relics/{relicId}/insurance-valuations` | 初始登记估值（V1 即生效，来源/机构/币种/有效期+凭证） |
+| `POST /api/relics/{relicId}/insurance-valuations/revisions` | 金额修订：新版本（待复核）+ 保险批单 + 凭证 |
+| `POST /api/insurance-valuation-versions/{versionId}/review` | 双人审批（复核人须异于提出人） |
+| `GET /api/relics/{relicId}/insurance-valuation?role=` | 估值详情与版本链（按角色脱敏；公众/馆员拒绝） |
+| `GET /api/borrow-applications/{applicationId}/insurance-valuation?role=` | 借展沿用的签约时估值版本（与当前版本对照） |
+| `GET /api/insurance-valuation-reminders?role=&status=` | 临期/过期提醒列表 |
+| `POST /api/insurance-valuation-reminders/scan` | 手动触发一轮提醒扫描（与定时任务同口径） |
+
+### 测试
+
+`InsuranceValuationTest`（独立内存库）覆盖：V1 登记全字段固化、重复登记拒绝；
+财务白名单脱敏（只见金额/币种/有效期/凭证），公众/普通馆员/未声明角色拒绝；
+修订必须关联批单、有效期校验、待复核不可重复提出；同人复核拒绝、驳回必填意见、
+异于人复核通过后旧版本 `SUPERSEDED`；借展在 V1 签约、在途修订出 V2 后
+`boundVersion` 仍为 V1 且归还正常；登记即过期的估值仍可完成审批/出库/归还；
+提醒幂等扫描、新版本生效后旧提醒 `RESOLVED` 留痕；驳回版本封存不可再审；
+**缺权收紧后登记、修订（原地址）、换登记地址与复核地址调用全部入口拒绝**，
+只读查询仍可用，放开后恢复。

@@ -603,4 +603,55 @@ public final class MuseumConstants {
     public static final String ACTION_OPEN_DISPLAY_REVOKE = "OPEN_DISPLAY_REVOKE";
     public static final String ACTION_SUPPLEMENT_OPEN = "SUPPLEMENT_OPEN";
     public static final String ACTION_SUPPLEMENT_CLOSE = "SUPPLEMENT_CLOSE";
+
+    // --------------------------------------------------------------------
+    // museum-15 文物保险估值管理
+    // --------------------------------------------------------------------
+
+    /** 估值主单状态：生效中（估值只追加版本，不物理撤销） */
+    public static final String IVAL_ACTIVE = "ACTIVE";
+
+    /**
+     * 估值版本状态：
+     * PENDING_APPROVAL 修订待双人复核 / APPROVED 当前或历史生效
+     * / SUPERSEDED 已被新版本取代 / REJECTED 复核驳回（封存只读）
+     */
+    public static final String IVAL_PENDING_APPROVAL = "PENDING_APPROVAL";
+    public static final String IVAL_APPROVED = "APPROVED";
+    public static final String IVAL_SUPERSEDED = "SUPERSEDED";
+    public static final String IVAL_REJECTED = "REJECTED";
+
+    /** 金额修订复核决定：通过 / 驳回 */
+    public static final String IVAL_REVIEW_APPROVE = "APPROVE";
+    public static final String IVAL_REVIEW_REJECT = "REJECT";
+
+    /** 临期（默认到期前 30 天）/ 已过期提醒 */
+    public static final String IVAL_REMIND_EXPIRING = "EXPIRING";
+    public static final String IVAL_REMIND_EXPIRED = "EXPIRED";
+
+    /** 提醒状态：待处理 / 已处理（新版本生效后旧版本提醒自动闭环） */
+    public static final String IVAL_REMIND_OPEN = "OPEN";
+    public static final String IVAL_REMIND_RESOLVED = "RESOLVED";
+
+    /**
+     * 估值信息访问岗位：
+     * INSURANCE_ADMIN 保险管理员（估值来源/评估机构/凭证等敏感字段全可见，可发起变更）
+     * / FINANCE 财务（只可见金额/币种/有效期与凭证，不可见来源机构，不能变更）
+     * / LIBRARIAN 普通馆员 / PUBLIC 公众（两者一律不可访问敏感字段）。
+     */
+    public static final String ROLE_INSURANCE_ADMIN = "INSURANCE_ADMIN";
+    public static final String ROLE_FINANCE = "FINANCE";
+    public static final String ROLE_PUBLIC = "PUBLIC";
+
+    /** 台账流水动作：估值登记 / 金额修订提出 / 双人复核通过 / 复核驳回 / 借展绑定签约快照 / 临期过期提醒 */
+    public static final String ACTION_IVAL_REGISTER = "IVAL_REGISTER";
+    public static final String ACTION_IVAL_REVISE = "IVAL_REVISE";
+    public static final String ACTION_IVAL_REVIEW_APPROVE = "IVAL_REVIEW_APPROVE";
+    public static final String ACTION_IVAL_REVIEW_REJECT = "IVAL_REVIEW_REJECT";
+    public static final String ACTION_IVAL_LOAN_BIND = "IVAL_LOAN_BIND";
+    public static final String ACTION_IVAL_REMIND = "IVAL_REMIND";
+
+    /** 权限策略事件：保险估值变更留痕收紧 / 放开 */
+    public static final String ACTION_IVAL_POLICY_TIGHTEN = "IVAL_PERMIT_TIGHTEN";
+    public static final String ACTION_IVAL_POLICY_RELAX = "IVAL_PERMIT_RELAX";
 }
